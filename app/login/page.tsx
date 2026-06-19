@@ -23,7 +23,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
-      toast.error(error.message)
+      toast.error(error.message || error.code || JSON.stringify(error) || 'Login failed')
       setLoading(false)
       return
     }
