@@ -47,8 +47,9 @@ export function SetupRequired({ userError, orgError }: Props) {
             </div>
           )}
           <p className="text-xs">
-            In Supabase, run migration <code>003_seed_user.sql</code> for your auth user and enable the
-            custom access token hook so JWT includes <code>org_id</code>. Then sign out and sign in again.
+            If your hook is already enabled, sign out and sign in again so a fresh JWT is issued with{' '}
+            <code>org_id</code>. Also confirm the <code>organizations</code> row exists for your user&apos;s{' '}
+            <code>organization_id</code>.
           </p>
           <Button onClick={handleSignOut} variant="outline" className="w-full">
             Sign out

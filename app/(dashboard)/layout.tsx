@@ -18,22 +18,42 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const [userResult, orgResult] = await Promise.all([
-    supabase.from('users').select('*').eq('id', user.id).single(),
-    supabase.from('organizations').select('*').limit(1).single(),
-  ])
+  const userResult = await supabase.from('users').select('*').eq('id', user.id).single()
 
-  if (!userResult.data || !orgResult.data) {
-    console.error('Dashboard layout data missing:', { userErr: userResult.error, orgErr: orgResult.error })
+  if (!userResult.data) {
+    console.error('Dashboard layout user missing:', userResult.error)
     return (
       <SetupRequired
-        userError={userResult.error?.message ?? (!userResult.data ? 'No user profile row found' : null)}
-        orgError={orgResult.error?.message ?? (!orgResult.data ? 'No organization row found' : null)}
+        userError={userResult.error?.message ?? 'No user profile row found for this login'}
+        orgError={
+          userResult.error?.code === 'PGRST116'
+            ? `No row in users for auth id ${user.id}. Add this UUID to the users table.`
+            : null
+        }
       />
     )
   }
 
   const profile = userResult.data as unknown as UserProfile
+
+  const orgResult = await supabase
+    .from('organizations')
+    .select('*')
+    .eq('id', profile.organization_id)
+    .single()
+
+  if (!orgResult.data) {
+    console.error('Dashboard layout org missing:', orgResult.error)
+    return (
+      <SetupRequired
+        orgError={
+          orgResult.error?.message ??
+          `No organization found for id ${profile.organization_id}. Run 002_seed_dev.sql or sign out and sign in again so org_id is in your JWT.`
+        }
+      />
+    )
+  }
+
   const organization = orgResult.data as unknown as Organization
 
   const [branchResult, settingsResult] = await Promise.all([
