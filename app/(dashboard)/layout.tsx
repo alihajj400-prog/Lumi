@@ -14,13 +14,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
     supabase.from('organizations').select('*').limit(1).single(),
   ])
 
-  if (!userResult.data) {
-    console.error('Dashboard layout: user row not found', userResult.error)
-    redirect('/login')
-  }
-  if (!orgResult.data) {
-    console.error('Dashboard layout: org not found', orgResult.error)
-    redirect('/login')
+  // If RLS blocks these queries (e.g. JWT missing org_id claim), don't redirect loop
+  if (!userResult.data || !orgResult.data) {
+    console.error('Dashboard layout data missing:', { userErr: userResult.error, orgErr: orgResult.error })
   }
 
   const profile = userResult.data as unknown as UserProfile
