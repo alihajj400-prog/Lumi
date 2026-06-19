@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { decrementStock, incrementStock, setStockQty } from '@/lib/inventory/stock'
 import { toast } from 'sonner'
 import { formatUsd } from '@/lib/currency'
 import { formatDate, formatDateTime } from '@/lib/format'
@@ -177,22 +178,23 @@ export function InventoryClient({ initialProducts, initialMovements }: Props) {
     setAdjLoading(true)
     try {
       const supabase = createClient()
-      let newQty: number
       const current = adjustProduct.stock_qty
+      let newQty: number
+      let movementQty: number
 
-      if (adjType === 'add') newQty = current + qty
-      else if (adjType === 'subtract') newQty = current - qty
-      else newQty = qty // set
+      if (adjType === 'add') {
+        newQty = current + qty
+        movementQty = qty
+        await incrementStock(adjustProduct.id, qty)
+      } else if (adjType === 'subtract') {
+        newQty = current - qty
+        movementQty = -qty
+        await decrementStock(adjustProduct.id, qty)
+      } else {
+        newQty = qty
+        movementQty = await setStockQty(adjustProduct.id, qty)
+      }
 
-      // Update stock_qty on product
-      const { error: prodErr } = await supabase
-        .from('products')
-        .update({ stock_qty: newQty })
-        .eq('id', adjustProduct.id)
-      if (prodErr) throw prodErr
-
-      // Insert stock movement
-      const movementQty = adjType === 'add' ? qty : adjType === 'subtract' ? -qty : newQty - current
       const { data: newMovement, error: movErr } = await supabase
         .from('stock_movements')
         .insert({

@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { usePosStore, PaymentEntry } from '@/lib/store/pos-store'
 import { formatUsd, formatLbp, usdCentsToLbpPiasters, exchangeRateValue } from '@/lib/currency'
@@ -17,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { createPosSaleWithStock } from '@/lib/inventory/stock'
 import { Loader2, Plus, Trash2 } from 'lucide-react'
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: string }[] = [
@@ -89,6 +89,7 @@ export function CheckoutDialog({
   }
 
   const handleCheckout = async () => {
+    if (loading) return
     if (!sessionId || !branchId) {
       toast.error('No active session or branch')
       return
@@ -99,85 +100,37 @@ export function CheckoutDialog({
     }
     setLoading(true)
     try {
-      const supabase = createClient()
-
-      // 1. Insert sale
       const saleNumber = generateSaleNumber()
-      const { data: saleData, error: saleErr } = await supabase
-        .from('sales')
-        .insert({
-          organization_id: orgId,
-          branch_id: branchId,
-          cash_session_id: sessionId,
-          cashier_id: userId,
-          sale_number: saleNumber,
-          status: 'completed',
-          subtotal_usd: sub,
-          discount_amount_usd: discount_usd,
-          tax_amount_usd: tax,
-          total_usd: tot,
-          total_lbp: totLbp,
-          exchange_rate_used: exchangeRate,
-          is_return: false,
-        })
-        .select('id, sale_number, created_at')
-        .single()
-
-      if (saleErr) throw saleErr
-      const saleId = (saleData as any).id
-
-      // 2. Insert sale items
-      const saleItems = items.map(item => ({
-        sale_id: saleId,
-        product_id: item.product_id,
-        product_name: item.name,
-        quantity: item.quantity,
-        unit_price_usd: item.price_usd,
-        unit_price_lbp: item.price_lbp,
-        discount_amount_usd: item.discount_usd,
-        line_total_usd: item.price_usd * item.quantity - item.discount_usd,
-      }))
-
-      const { error: itemsErr } = await supabase.from('sale_items').insert(saleItems)
-      if (itemsErr) throw itemsErr
-
-      // 3. Insert payments
-      const paymentRows = payments
-        .filter(p => p.amount_usd > 0 || p.amount_lbp > 0)
-        .map(p => ({
-          sale_id: saleId,
-          method: p.method,
-          amount_usd: p.amount_usd,
-          amount_lbp: p.amount_lbp,
-          reference_number: p.reference || null,
-        }))
-
-      if (paymentRows.length > 0) {
-        const { error: payErr } = await supabase.from('payments').insert(paymentRows)
-        if (payErr) throw payErr
-      }
-
-      // 4. Decrease stock_qty directly for each item
-      for (const item of items) {
-        await supabase.rpc('decrement_stock', {
-          p_product_id: item.product_id,
-          p_qty: item.quantity,
-        })
-      }
-
-      // 5. Insert stock_movements for each item
-      const movements = items.map(item => ({
-        organization_id: orgId,
-        branch_id: branchId,
-        product_id: item.product_id,
-        movement_type: 'sale',
-        quantity: -item.quantity,
-        reference_id: saleId,
-        reference_type: 'sale',
-        reason: `Sale ${saleNumber}`,
-        performed_by: userId,
-      }))
-      await supabase.from('stock_movements').insert(movements)
+      const saleData = await createPosSaleWithStock({
+        organizationId: orgId,
+        branchId,
+        cashSessionId: sessionId,
+        cashierId: userId,
+        saleNumber,
+        subtotalUsd: sub,
+        discountAmountUsd: discount_usd,
+        taxAmountUsd: tax,
+        totalUsd: tot,
+        totalLbp: totLbp,
+        exchangeRateUsed: exchangeRate,
+        items: items.map(item => ({
+          product_id: item.product_id,
+          product_name: item.name,
+          quantity: item.quantity,
+          unit_price_usd: item.price_usd,
+          unit_price_lbp: item.price_lbp,
+          discount_amount_usd: item.discount_usd,
+          line_total_usd: item.price_usd * item.quantity - item.discount_usd,
+        })),
+        payments: payments
+          .filter(p => p.amount_usd > 0 || p.amount_lbp > 0)
+          .map(p => ({
+            method: p.method,
+            amount_usd: p.amount_usd,
+            amount_lbp: p.amount_lbp,
+            reference_number: p.reference || null,
+          })),
+      })
 
       setPayments([{ method: 'cash_usd', amount_usd: 0, amount_lbp: 0, reference: '' }])
       onComplete({ ...saleData, items, payments, change, org })

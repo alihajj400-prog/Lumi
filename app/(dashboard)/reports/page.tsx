@@ -10,7 +10,7 @@ export default async function ReportsPage() {
   const [salesResult, productsResult] = await Promise.all([
     supabase
       .from('sales')
-      .select('id, total_usd, total_lbp, status, created_at, sale_items(product_id, product_name, quantity, line_total_usd), payments(method, amount_usd, amount_lbp)')
+      .select('id, total_usd, total_lbp, exchange_rate_used, status, created_at, sale_items(product_id, product_name, quantity, line_total_usd), payments(method, amount_usd, amount_lbp)')
       .gte('created_at', thirtyDaysAgo)
       .order('created_at', { ascending: true }),
     supabase

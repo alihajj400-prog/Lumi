@@ -3,6 +3,7 @@
 import { useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { incrementStock } from '@/lib/inventory/stock'
 import { toast } from 'sonner'
 import { formatUsd } from '@/lib/currency'
 import { formatDate } from '@/lib/format'
@@ -305,7 +306,9 @@ export function PurchasesClient({ initialPurchases, suppliers, products, userId 
     try {
       const supabase = createClient()
       const updates = viewPo.purchase_items.map(item => {
-        const qty = parseFloat(receiveQtys[item.id] || '0')
+        const remaining = item.ordered_qty - item.received_qty
+        const rawQty = parseFloat(receiveQtys[item.id] || '0')
+        const qty = Math.min(Math.max(0, rawQty), remaining)
         return {
           id: item.id,
           product_id: item.product_id,
@@ -344,25 +347,11 @@ export function PurchasesClient({ initialPurchases, suppliers, products, userId 
         })
         .eq('id', viewPo.id)
 
-      // Increase stock_qty for tracked products
+      // Increase stock_qty for tracked products (atomic RPC)
       for (const u of updates) {
         if (u.track_stock && u.qty > 0) {
-          await supabase
-            .from('products')
-            .update({ stock_qty: supabase.rpc('increment_stock' as any, { p_product_id: u.product_id, p_qty: u.qty }) })
-          // Use direct update instead
-          const { data: prod } = await supabase
-            .from('products')
-            .select('stock_qty')
-            .eq('id', u.product_id)
-            .single()
-          if (prod) {
-            await supabase
-              .from('products')
-              .update({ stock_qty: (prod as any).stock_qty + u.qty })
-              .eq('id', u.product_id)
-          }
-          // Insert stock movement
+          await incrementStock(u.product_id, u.qty)
+
           await supabase.from('stock_movements').insert({
             organization_id: organization?.id,
             branch_id: branch?.id,

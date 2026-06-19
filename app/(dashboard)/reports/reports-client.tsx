@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { formatUsd } from '@/lib/currency'
+import { exchangeRateValue, formatUsd } from '@/lib/currency'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -15,6 +15,8 @@ import {
 interface Sale {
   id: string
   total_usd: number
+  total_lbp: number
+  exchange_rate_used: number
   status: string
   created_at: string
   sale_items: { product_id: string; product_name: string; quantity: number; line_total_usd: number }[]
@@ -62,11 +64,13 @@ export function ReportsClient({ sales, products }: { sales: Sale[]; products: Pr
   // ── Payment methods breakdown ───────────────────────────────────────────────
   const paymentBreakdown = useMemo(() => {
     const byMethod: Record<string, number> = {}
-    completedSales.forEach(s =>
+    completedSales.forEach(s => {
+      const rate = exchangeRateValue(s.exchange_rate_used ?? 90000)
       s.payments.forEach(p => {
-        byMethod[p.method] = (byMethod[p.method] ?? 0) + p.amount_usd
+        const usdEquivalent = p.amount_usd + Math.round(p.amount_lbp / rate / 100) * 100
+        byMethod[p.method] = (byMethod[p.method] ?? 0) + usdEquivalent
       })
-    )
+    })
     const total = Object.values(byMethod).reduce((s, v) => s + v, 0) || 1
     return Object.entries(byMethod)
       .sort(([, a], [, b]) => b - a)

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { voidSaleWithStockRestore } from '@/lib/inventory/stock'
 import { toast } from 'sonner'
 import { formatUsd, formatLbp } from '@/lib/currency'
 import { formatDateTime } from '@/lib/format'
@@ -98,18 +98,13 @@ export function SalesClient({ initialSales }: { initialSales: Sale[] }) {
     }
     setVoiding(true)
     try {
-      const supabase = createClient()
-      const { error } = await supabase
-        .from('sales')
-        .update({ status: 'voided', void_reason: voidReason.trim() })
-        .eq('id', voidTarget.id)
-      if (error) throw error
+      await voidSaleWithStockRestore(voidTarget.id, voidReason)
       setSales(prev => prev.map(s =>
         s.id === voidTarget.id ? { ...s, status: 'voided', void_reason: voidReason.trim() } : s
       ))
       setVoidTarget(null)
       setVoidReason('')
-      toast.success('Sale voided')
+      toast.success('Sale voided and stock restored')
     } catch (err: any) {
       toast.error(err.message ?? 'Failed to void sale')
     } finally {
@@ -306,7 +301,7 @@ export function SalesClient({ initialSales }: { initialSales: Sale[] }) {
             <DialogTitle>Void Sale — {voidTarget?.sale_number}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            <p className="text-sm text-gray-500">This sale will be marked as voided. Stock levels will not be automatically reversed.</p>
+            <p className="text-sm text-gray-500">This sale will be voided and stock for tracked products will be restored automatically.</p>
             <div className="space-y-1.5">
               <Label>Reason <span className="text-red-500">*</span></Label>
               <Textarea

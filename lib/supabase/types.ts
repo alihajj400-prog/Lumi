@@ -272,7 +272,30 @@ export type Database = {
       activity_logs: { Row: ActivityLog; Insert: Partial<ActivityLog>; Update: Partial<ActivityLog> }
     }
     Views: Record<string, never>
-    Functions: Record<string, never>
+    Functions: {
+      decrement_stock: { Args: { p_product_id: string; p_qty: number }; Returns: void }
+      increment_stock: { Args: { p_product_id: string; p_qty: number }; Returns: void }
+      set_stock_qty: { Args: { p_product_id: string; p_new_qty: number }; Returns: number }
+      create_pos_sale: {
+        Args: {
+          p_organization_id: string
+          p_branch_id: string
+          p_cash_session_id: string
+          p_cashier_id: string
+          p_sale_number: string
+          p_subtotal_usd: number
+          p_discount_amount_usd: number
+          p_tax_amount_usd: number
+          p_total_usd: number
+          p_total_lbp: number
+          p_exchange_rate_used: number
+          p_items: Record<string, unknown>[]
+          p_payments: Record<string, unknown>[]
+        }
+        Returns: { id: string; sale_number: string; created_at: string }
+      }
+      void_sale: { Args: { p_sale_id: string; p_void_reason: string }; Returns: void }
+    }
     Enums: Record<string, never>
   }
 }
