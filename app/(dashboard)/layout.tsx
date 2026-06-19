@@ -14,7 +14,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
     supabase.from('organizations').select('*').limit(1).single(),
   ])
 
-  if (!userResult.data || !orgResult.data) redirect('/login')
+  if (!userResult.data) {
+    console.error('Dashboard layout: user row not found', userResult.error)
+    redirect('/login')
+  }
+  if (!orgResult.data) {
+    console.error('Dashboard layout: org not found', orgResult.error)
+    redirect('/login')
+  }
 
   const profile = userResult.data as unknown as UserProfile
   const organization = orgResult.data as unknown as Organization
