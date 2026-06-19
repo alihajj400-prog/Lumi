@@ -26,14 +26,21 @@ export default async function DashboardPage() {
       .filter('deleted_at', 'is', null),
     supabase
       .from('sales')
-      .select('id, sale_number, total_usd, status, created_at, users(full_name)')
+      .select('id, sale_number, total_usd, status, created_at, cashier:users!cashier_id(full_name)')
       .order('created_at', { ascending: false })
       .limit(10),
   ])
 
   const sales = (salesResult.data ?? []) as unknown as Array<{ total_usd: number; total_lbp: number }>
   const allProducts = (lowStockResult.data ?? []) as unknown as Array<{ id: string; name: string; sku: string; stock_qty: number; reorder_level: number; unit: string }>
-  const recentSales = (recentSalesResult.data ?? []) as unknown as Array<{ id: string; sale_number: string; total_usd: number; status: string; created_at: string; users: { full_name: string } | null }>
+  const recentSales = (recentSalesResult.data ?? []) as unknown as Array<{
+    id: string
+    sale_number: string
+    total_usd: number
+    status: string
+    created_at: string
+    cashier: { full_name: string } | null
+  }>
 
   const totalSalesUsd = sales.reduce((sum, s) => sum + s.total_usd, 0)
   const totalSalesLbp = sales.reduce((sum, s) => sum + s.total_lbp, 0)
@@ -128,7 +135,7 @@ export default async function DashboardPage() {
                     <div>
                       <p className="text-sm font-medium">{sale.sale_number}</p>
                       <p className="text-xs text-muted-foreground">
-                        {sale.users?.full_name} · {formatDateTime(sale.created_at)}
+                        {sale.cashier?.full_name ?? 'Unknown'} · {formatDateTime(sale.created_at)}
                       </p>
                     </div>
                     <div className="text-right">

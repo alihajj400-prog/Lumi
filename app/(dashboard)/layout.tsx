@@ -1,10 +1,19 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { DashboardShell } from '@/components/layout/dashboard-shell'
+import { SetupRequired } from '@/components/layout/setup-required'
 import type { UserProfile, Organization, Branch, OrgSettings } from '@/lib/supabase/types'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient()
+
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    return (
+      <SetupRequired
+        orgError="Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel environment variables."
+      />
+    )
+  }
 
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
@@ -14,9 +23,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
     supabase.from('organizations').select('*').limit(1).single(),
   ])
 
-  // If RLS blocks these queries (e.g. JWT missing org_id claim), don't redirect loop
   if (!userResult.data || !orgResult.data) {
     console.error('Dashboard layout data missing:', { userErr: userResult.error, orgErr: orgResult.error })
+    return (
+      <SetupRequired
+        userError={userResult.error?.message ?? (!userResult.data ? 'No user profile row found' : null)}
+        orgError={orgResult.error?.message ?? (!orgResult.data ? 'No organization row found' : null)}
+      />
+    )
   }
 
   const profile = userResult.data as unknown as UserProfile
@@ -33,8 +47,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <DashboardShell
       user={profile}
       organization={organization}
-      branch={branchResult.data as unknown as Branch}
-      settings={settingsResult.data as unknown as OrgSettings}
+      branch={branchResult.data as unknown as Branch | null}
+      settings={settingsResult.data as unknown as OrgSettings | null}
     >
       {children}
     </DashboardShell>

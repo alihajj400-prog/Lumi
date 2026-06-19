@@ -6,7 +6,7 @@ export default async function LogsPage() {
 
   const { data } = await supabase
     .from('activity_logs')
-    .select('*, users(full_name)')
+    .select('*, actor:users!user_id(full_name)')
     .order('created_at', { ascending: false })
     .limit(300)
 

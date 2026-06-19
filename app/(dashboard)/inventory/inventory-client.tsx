@@ -65,7 +65,7 @@ interface Movement {
   reference_type: string | null
   created_at: string
   products: { name: string; sku: string } | null
-  users: { full_name: string } | null
+  performer: { full_name: string } | null
 }
 
 interface Props {
@@ -207,7 +207,7 @@ export function InventoryClient({ initialProducts, initialMovements }: Props) {
           reference_type: 'manual',
           performed_by: user.id,
         })
-        .select('id, product_id, movement_type, quantity, reason, reference_type, created_at, products(name, sku), users(full_name)')
+        .select('id, product_id, movement_type, quantity, reason, reference_type, created_at, products(name, sku), performer:users!performed_by(full_name)')
         .single()
       if (movErr) throw movErr
 
@@ -543,7 +543,7 @@ export function InventoryClient({ initialProducts, initialMovements }: Props) {
                           {m.reason ?? '—'}
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
-                          {(m.users as any)?.full_name ?? '—'}
+                          {m.performer?.full_name ?? '—'}
                         </td>
                       </tr>
                     ))

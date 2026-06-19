@@ -16,7 +16,7 @@ interface Log {
   new_value: any
   ip_address: string | null
   created_at: string
-  users: { full_name: string } | null
+  actor: { full_name: string } | null
 }
 
 const ACTION_COLORS: Record<string, string> = {
@@ -43,7 +43,7 @@ export function LogsClient({ initialLogs }: { initialLogs: Log[] }) {
     return initialLogs.filter(l =>
       l.action.toLowerCase().includes(q) ||
       (l.entity_type ?? '').toLowerCase().includes(q) ||
-      (l.users?.full_name ?? '').toLowerCase().includes(q)
+      (l.actor?.full_name ?? '').toLowerCase().includes(q)
     )
   }, [initialLogs, search])
 
@@ -81,7 +81,7 @@ export function LogsClient({ initialLogs }: { initialLogs: Log[] }) {
                 {filtered.map(log => (
                   <tr key={log.id} className="border-b border-gray-50 hover:bg-gray-50">
                     <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">{formatDateTime(log.created_at)}</td>
-                    <td className="px-4 py-3 font-medium text-gray-800">{log.users?.full_name ?? '—'}</td>
+                    <td className="px-4 py-3 font-medium text-gray-800">{log.actor?.full_name ?? '—'}</td>
                     <td className="px-4 py-3">
                       <Badge className={`text-xs ${getActionColor(log.action)}`}>{log.action}</Badge>
                     </td>

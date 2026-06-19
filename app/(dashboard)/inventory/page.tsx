@@ -13,7 +13,7 @@ export default async function InventoryPage() {
       .order('name', { ascending: true }),
     supabase
       .from('stock_movements')
-      .select('id, product_id, movement_type, quantity, reason, reference_type, reference_id, performed_by, created_at, products(name, sku), users(full_name)')
+      .select('id, product_id, movement_type, quantity, reason, reference_type, reference_id, performed_by, created_at, products(name, sku), performer:users!performed_by(full_name)')
       .order('created_at', { ascending: false })
       .limit(200),
   ])
