@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { usePosStore } from '@/lib/store/pos-store'
@@ -37,7 +37,16 @@ interface Props {
 
 export function PosClient({ products, categories, activeSession, userId, userProfile, org }: Props) {
   const router = useRouter()
-  const { sessionId, setSessionId, items, heldOrders, holdCart, clearCart } = usePosStore()
+  // Narrow Zustand selectors — each subscribes only to what it needs.
+  // Wide destructuring caused PosClient to rerender on every cart change,
+  // which forced filteredProducts to recompute and ProductGrid to re-render.
+  const sessionId    = usePosStore(s => s.sessionId)
+  const setSessionId = usePosStore(s => s.setSessionId)
+  const hasItems     = usePosStore(s => s.items.length > 0)
+  const heldCount    = usePosStore(s => s.heldOrders.length)
+  const holdCart     = usePosStore(s => s.holdCart)
+  const clearCart    = usePosStore(s => s.clearCart)
+
   const [search, setSearch] = useState('')
   const [selectedCat, setSelectedCat] = useState<string>('all')
   const [showOpen, setShowOpen] = useState(false)
@@ -70,23 +79,27 @@ export function PosClient({ products, categories, activeSession, userId, userPro
 
   const hasSession = !!sessionId
 
-  const filteredProducts = products.filter(p => {
-    const matchesCat = selectedCat === 'all' || p.category_id === selectedCat
+  // Memoized so category/search changes recompute only when their deps change,
+  // not on every cart update or dialog toggle.
+  const filteredProducts = useMemo(() => {
     const q = search.toLowerCase()
-    const matchesSearch =
-      !q ||
-      p.name.toLowerCase().includes(q) ||
-      p.sku.toLowerCase().includes(q) ||
-      (p.barcode ?? '').includes(q)
-    return matchesCat && matchesSearch
-  })
+    return products.filter(p => {
+      const matchesCat = selectedCat === 'all' || p.category_id === selectedCat
+      const matchesSearch =
+        !q ||
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        (p.barcode ?? '').includes(q)
+      return matchesCat && matchesSearch
+    })
+  }, [products, selectedCat, search])
 
   const handleHold = useCallback(() => {
-    if (items.length === 0) return
+    if (!hasItems) return
     const label = `Order ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`
     holdCart(label)
     toast.success('Order held')
-  }, [items, holdCart])
+  }, [hasItems, holdCart])
 
   const handleSaleComplete = useCallback((sale: any) => {
     setShowCheckout(false)
@@ -137,9 +150,9 @@ export function PosClient({ products, categories, activeSession, userId, userPro
             >
               <PlayCircle className="h-4 w-4 mr-1" />
               Held
-              {heldOrders.length > 0 && (
+              {heldCount > 0 && (
                 <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-[#E8A427] text-white text-[10px] flex items-center justify-center font-bold">
-                  {heldOrders.length}
+                  {heldCount}
                 </span>
               )}
             </Button>
@@ -149,7 +162,7 @@ export function PosClient({ products, categories, activeSession, userId, userPro
               variant="outline"
               size="sm"
               onClick={handleHold}
-              disabled={items.length === 0 || !hasSession}
+              disabled={!hasItems || !hasSession}
             >
               <Pause className="h-4 w-4 mr-1" />
               Hold
@@ -183,34 +196,13 @@ export function PosClient({ products, categories, activeSession, userId, userPro
           </div>
         </div>
 
-        {/* Category tabs */}
-        <div className="flex gap-2 px-4 py-2 overflow-x-auto scrollbar-hide border-b border-gray-100">
-          <button
-            onClick={() => setSelectedCat('all')}
-            className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              selectedCat === 'all'
-                ? 'bg-[#1B2A4A] text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-            }`}
-          >
-            All
-          </button>
-          {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCat(cat.id)}
-              className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex items-center gap-1 ${
-                selectedCat === cat.id
-                  ? 'text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-              style={selectedCat === cat.id ? { backgroundColor: cat.color ?? '#1B2A4A' } : undefined}
-            >
-              {cat.icon && <span>{cat.icon}</span>}
-              {cat.name}
-            </button>
-          ))}
-        </div>
+        {/* Category tabs — rendered as a memoized child so selectedCat changes
+            only rerender this strip, not the whole PosClient tree */}
+        <CategoryTabs
+          categories={categories}
+          selectedCat={selectedCat}
+          onSelect={setSelectedCat}
+        />
 
         {/* Product grid */}
         <div className="flex-1 overflow-y-auto p-4">
@@ -311,3 +303,46 @@ export function PosClient({ products, categories, activeSession, userId, userPro
     </div>
   )
 }
+
+// Memoized so it only rerenders when selectedCat or categories list changes.
+// Extracted from PosClient to prevent the entire parent from rerendering
+// just because the active tab highlight changed.
+const CategoryTabs = memo(function CategoryTabs({
+  categories,
+  selectedCat,
+  onSelect,
+}: {
+  categories: { id: string; name: string; color: string | null; icon?: string }[]
+  selectedCat: string
+  onSelect: (id: string) => void
+}) {
+  return (
+    <div className="flex gap-2 px-4 py-2 overflow-x-auto scrollbar-hide border-b border-gray-100">
+      <button
+        onClick={() => onSelect('all')}
+        className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+          selectedCat === 'all'
+            ? 'bg-[#1B2A4A] text-white'
+            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+        }`}
+      >
+        All
+      </button>
+      {categories.map(cat => (
+        <button
+          key={cat.id}
+          onClick={() => onSelect(cat.id)}
+          className={`shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex items-center gap-1 ${
+            selectedCat === cat.id
+              ? 'text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+          style={selectedCat === cat.id ? { backgroundColor: cat.color ?? '#1B2A4A' } : undefined}
+        >
+          {cat.icon && <span>{cat.icon}</span>}
+          {cat.name}
+        </button>
+      ))}
+    </div>
+  )
+})
