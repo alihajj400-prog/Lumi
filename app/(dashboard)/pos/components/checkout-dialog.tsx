@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
+import { createClient } from '@/lib/supabase/client'
 import { usePosStore, PaymentEntry } from '@/lib/store/pos-store'
 import { formatUsd, formatLbp, usdCentsToLbpPiasters, exchangeRateValue } from '@/lib/currency'
 import { PaymentMethod } from '@/lib/supabase/types'
@@ -16,8 +17,15 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { createPosSaleWithStock } from '@/lib/inventory/stock'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { Loader2, Plus, Trash2, User } from 'lucide-react'
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: string }[] = [
   { value: 'cash_usd', label: 'Cash USD', icon: '💵' },
@@ -48,6 +56,13 @@ function generateSaleNumber() {
   return `SALE-${datePart}-${randPart}`
 }
 
+interface Customer {
+  id: string
+  name: string
+  balance_usd: number
+  credit_limit_usd: number
+}
+
 export function CheckoutDialog({
   open, onOpenChange, org, sessionId, userId, branchId, orgId, onComplete,
 }: Props) {
@@ -56,6 +71,20 @@ export function CheckoutDialog({
     { method: 'cash_usd', amount_usd: 0, amount_lbp: 0, reference: '' },
   ])
   const [loading, setLoading] = useState(false)
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [selectedCustomer, setSelectedCustomer] = useState<string>('none')
+  const [chargeToAccount, setChargeToAccount] = useState(false)
+
+  useEffect(() => {
+    if (!open) return
+    const supabase = createClient()
+    supabase
+      .from('customers')
+      .select('id, name, balance_usd, credit_limit_usd')
+      .is('deleted_at', null)
+      .order('name')
+      .then(({ data }) => setCustomers((data ?? []) as Customer[]))
+  }, [open])
 
   const exchangeRate = org?.exchange_rate ?? 90000
   const vatEnabled = org?.vat_enabled ?? false
@@ -69,7 +98,8 @@ export function CheckoutDialog({
   const totalPaidLbp = payments.reduce((s, p) => s + p.amount_lbp, 0)
   const totalPaidInUsd = totalPaidUsd + Math.round(totalPaidLbp / exchangeRateValue(exchangeRate) / 100) * 100
   const change = totalPaidInUsd - tot
-  const isFullyPaid = totalPaidInUsd >= tot
+  const isFullyPaid = chargeToAccount ? selectedCustomer !== 'none' : totalPaidInUsd >= tot
+  const selectedCust = customers.find(c => c.id === selectedCustomer) ?? null
 
   const updatePayment = (index: number, field: keyof PaymentEntry, value: any) => {
     setPayments(prev => prev.map((p, i) => i === index ? { ...p, [field]: value } : p))
@@ -94,13 +124,28 @@ export function CheckoutDialog({
       toast.error('No active session or branch')
       return
     }
-    if (!isFullyPaid) {
+    if (chargeToAccount && !selectedCustomer || selectedCustomer === 'none') {
+      toast.error('Select a customer to charge to account')
+      return
+    }
+    if (!chargeToAccount && !isFullyPaid) {
       toast.error('Payment is short')
       return
     }
     setLoading(true)
     try {
+      const supabase = createClient()
       const saleNumber = generateSaleNumber()
+
+      const salePayments = chargeToAccount
+        ? [{ method: 'other' as PaymentMethod, amount_usd: tot, amount_lbp: 0, reference_number: 'account' }]
+        : payments.filter(p => p.amount_usd > 0 || p.amount_lbp > 0).map(p => ({
+            method: p.method,
+            amount_usd: p.amount_usd,
+            amount_lbp: p.amount_lbp,
+            reference_number: p.reference || null,
+          }))
+
       const saleData = await createPosSaleWithStock({
         organizationId: orgId,
         branchId,
@@ -122,18 +167,32 @@ export function CheckoutDialog({
           discount_amount_usd: item.discount_usd,
           line_total_usd: item.price_usd * item.quantity - item.discount_usd,
         })),
-        payments: payments
-          .filter(p => p.amount_usd > 0 || p.amount_lbp > 0)
-          .map(p => ({
-            method: p.method,
-            amount_usd: p.amount_usd,
-            amount_lbp: p.amount_lbp,
-            reference_number: p.reference || null,
-          })),
+        payments: salePayments,
       })
 
+      // If charge-to-account: record transaction + update customer balance
+      if (chargeToAccount && selectedCustomer && selectedCustomer !== 'none') {
+        await supabase.from('customer_transactions').insert({
+          organization_id: orgId,
+          customer_id: selectedCustomer,
+          type: 'charge',
+          amount_usd: tot,
+          sale_id: saleData.id,
+          note: `Sale ${saleNumber}`,
+          created_by: userId,
+        })
+        const cust = selectedCust
+        if (cust) {
+          await supabase.from('customers')
+            .update({ balance_usd: cust.balance_usd + tot })
+            .eq('id', selectedCustomer)
+        }
+      }
+
       setPayments([{ method: 'cash_usd', amount_usd: 0, amount_lbp: 0, reference: '' }])
-      onComplete({ ...saleData, items, payments, change, org })
+      setChargeToAccount(false)
+      setSelectedCustomer('none')
+      onComplete({ ...saleData, items, payments: salePayments, change, org, customer: selectedCust })
     } catch (err: any) {
       toast.error(err.message ?? 'Checkout failed')
     } finally {
@@ -173,7 +232,53 @@ export function CheckoutDialog({
           </div>
         </div>
 
+        {/* Customer / Charge to account */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold flex items-center gap-1.5">
+              <User className="h-4 w-4" />
+              Customer
+            </Label>
+            <button
+              onClick={() => { setChargeToAccount(v => !v); setSelectedCustomer('none') }}
+              className={`text-xs font-medium px-2.5 py-1 rounded-full border transition-colors ${
+                chargeToAccount
+                  ? 'bg-[#1B2A4A] text-white border-[#1B2A4A]'
+                  : 'text-gray-500 border-gray-200 hover:border-gray-400'
+              }`}
+            >
+              Charge to Account
+            </button>
+          </div>
+          {chargeToAccount && (
+            <div className="space-y-1">
+              <Select value={selectedCustomer} onValueChange={v => setSelectedCustomer(v ?? 'none')}>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="Select customer..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Select customer —</SelectItem>
+                  {customers.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}{c.balance_usd > 0 ? ` · owes ${formatUsd(c.balance_usd)}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedCust && (
+                <p className="text-xs text-amber-600 font-medium">
+                  After this sale: {formatUsd(selectedCust.balance_usd + tot)} owed
+                  {selectedCust.credit_limit_usd > 0 && selectedCust.balance_usd + tot > selectedCust.credit_limit_usd
+                    ? ' — over limit!'
+                    : ''}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
         {/* Payments */}
+        {!chargeToAccount && (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <Label className="text-sm font-semibold">Payment</Label>
@@ -261,8 +366,10 @@ export function CheckoutDialog({
             <Plus className="h-3 w-3" /> Split payment
           </button>
         </div>
+        )}
 
-        {/* Change / balance */}
+        {/* Change / balance — only for direct payment */}
+        {!chargeToAccount && (
         <div className={`rounded-lg p-3 text-sm font-medium ${
           isFullyPaid ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
         }`}>
@@ -271,6 +378,7 @@ export function CheckoutDialog({
             : `Balance due: ${formatUsd(tot - totalPaidInUsd)}`
           }
         </div>
+        )}
 
         <Button
           onClick={handleCheckout}

@@ -35,6 +35,7 @@ import {
   LogOut,
   User,
   Menu,
+  UserCircle,
 } from 'lucide-react'
 
 interface NavItem {
@@ -53,6 +54,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/suppliers', label: 'Suppliers', icon: Truck, roles: ['admin', 'manager', 'accountant'] },
   { href: '/purchases', label: 'Purchases', icon: ClipboardList, roles: ['admin', 'manager', 'stock_clerk'] },
   { href: '/sales', label: 'Sales History', icon: History, roles: ['admin', 'manager', 'accountant'] },
+  { href: '/customers', label: 'Customers', icon: UserCircle, roles: ['admin', 'manager', 'cashier', 'accountant'] },
   { href: '/reports', label: 'Reports', icon: BarChart3, roles: ['admin', 'manager', 'accountant'] },
   { href: '/settings', label: 'Settings', icon: Settings, roles: ['admin', 'manager', 'accountant'] },
   { href: '/users', label: 'Users', icon: Users, roles: ['admin'] },
