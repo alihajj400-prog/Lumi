@@ -1,8 +1,9 @@
 'use client'
-import { useState, useTransition, useRef, useMemo } from 'react'
+import { useState, useTransition, useRef, useMemo, useDeferredValue, useCallback, memo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuthStore } from '@/lib/store/auth-store'
 import { formatUsd, formatLbp, usdToCents, lbpToPiasters } from '@/lib/currency'
+import { filterProductsByCategoryAndSearch } from '@/lib/products/filter-products'
 import { emptyProductForm, UNITS, type ProductFormData } from '@/lib/store/product-form'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -32,10 +33,83 @@ function generateSku(name: string): string {
   return name.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) + '-' + Math.floor(Math.random() * 9000 + 1000)
 }
 
+function renderStockStatus(p: Product) {
+  if (!p.track_stock) return null
+  if (p.stock_qty <= 0) return <Badge variant="destructive" className="text-[10px]">Out</Badge>
+  if (p.stock_qty <= p.reorder_level) return <Badge className="bg-amber-500 text-[10px]">Low</Badge>
+  return <Badge variant="outline" className="text-[10px] text-green-700 border-green-300">OK</Badge>
+}
+
+const ProductRow = memo(function ProductRow({
+  product: p,
+  onEdit,
+  onArchive,
+}: {
+  product: Product
+  onEdit: (p: Product) => void
+  onArchive: (id: string) => void
+}) {
+  const handleEdit = useCallback(() => onEdit(p), [onEdit, p])
+  const handleArchive = useCallback(() => onArchive(p.id), [onArchive, p.id])
+
+  return (
+    <TableRow className={!p.is_active ? 'opacity-50' : ''}>
+      <TableCell>
+        {p.image_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={p.image_url} alt={p.name} loading="lazy" decoding="async" className="w-10 h-10 rounded object-cover" />
+        ) : (
+          <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
+            <ImageIcon className="h-4 w-4 text-muted-foreground" />
+          </div>
+        )}
+      </TableCell>
+      <TableCell>
+        <div>
+          <p className="font-medium">{p.name}</p>
+          {p.name_ar && <p className="text-xs text-muted-foreground" dir="rtl">{p.name_ar}</p>}
+        </div>
+      </TableCell>
+      <TableCell className="text-sm font-mono text-muted-foreground">{p.sku}</TableCell>
+      <TableCell>
+        {p.categories && (
+          <Badge
+            variant="outline"
+            style={{ borderColor: p.categories.color ?? undefined, color: p.categories.color ?? undefined }}
+            className="text-[10px]"
+          >
+            {p.categories.name}
+          </Badge>
+        )}
+      </TableCell>
+      <TableCell className="text-sm text-muted-foreground capitalize">{p.unit}</TableCell>
+      <TableCell className="text-right font-medium">{formatUsd(p.price_usd)}</TableCell>
+      <TableCell className="text-right text-sm text-muted-foreground">{formatLbp(p.price_lbp)}</TableCell>
+      <TableCell className="text-right">
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-sm font-medium">{p.stock_qty}</span>
+          {renderStockStatus(p)}
+        </div>
+      </TableCell>
+      <TableCell>
+        <div className="flex gap-1 justify-end">
+          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleEdit}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="icon" variant="ghost" className="h-8 w-8 text-amber-600" onClick={handleArchive}>
+            <Archive className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  )
+})
+
 export function ProductsClient({ initialProducts, categories }: Props) {
   const { organization, branch } = useAuthStore()
   const [products, setProducts] = useState<Product[]>(initialProducts)
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [filterCat, setFilterCat] = useState('all')
   const [filterStatus, setFilterStatus] = useState('active')
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -50,14 +124,18 @@ export function ProductsClient({ initialProducts, categories }: Props) {
   const csvRef = useRef<HTMLInputElement>(null)
 
   const filtered = useMemo(() => {
-    return products.filter(p => {
-      const q = search.toLowerCase()
-      const matchSearch = !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.barcode ?? '').includes(q)
-      const matchCat = filterCat === 'all' || p.category_id === filterCat
-      const matchStatus = filterStatus === 'all' || (filterStatus === 'active' ? p.is_active : !p.is_active)
-      return matchSearch && matchCat && matchStatus
+    return filterProductsByCategoryAndSearch(products, filterCat, deferredSearch, {
+      statusFilter: filterStatus as 'all' | 'active' | 'inactive',
     })
-  }, [products, search, filterCat, filterStatus])
+  }, [products, deferredSearch, filterCat, filterStatus])
+
+  const handleFilterCat = useCallback((value: string | null) => {
+    startTransition(() => setFilterCat(value ?? 'all'))
+  }, [])
+
+  const handleFilterStatus = useCallback((value: string | null) => {
+    startTransition(() => setFilterStatus(value ?? 'active'))
+  }, [])
 
   function openAdd() {
     setEditing(null)
@@ -222,13 +300,6 @@ export function ProductsClient({ initialProducts, categories }: Props) {
     if (csvRef.current) csvRef.current.value = ''
   }
 
-  const stockStatus = (p: Product) => {
-    if (!p.track_stock) return null
-    if (p.stock_qty <= 0) return <Badge variant="destructive" className="text-[10px]">Out</Badge>
-    if (p.stock_qty <= p.reorder_level) return <Badge className="bg-amber-500 text-[10px]">Low</Badge>
-    return <Badge variant="outline" className="text-[10px] text-green-700 border-green-300">OK</Badge>
-  }
-
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
@@ -265,7 +336,7 @@ export function ProductsClient({ initialProducts, categories }: Props) {
               </button>
             )}
           </div>
-          <Select value={filterCat} onValueChange={(v) => setFilterCat(v ?? 'all')}>
+          <Select value={filterCat} onValueChange={handleFilterCat}>
             <SelectTrigger className="w-40">
               <Filter className="mr-2 h-3.5 w-3.5" />
               <SelectValue placeholder="Category" />
@@ -275,7 +346,7 @@ export function ProductsClient({ initialProducts, categories }: Props) {
               {categories.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v ?? 'active')}>
+          <Select value={filterStatus} onValueChange={handleFilterStatus}>
             <SelectTrigger className="w-32">
               <SelectValue />
             </SelectTrigger>
@@ -314,55 +385,12 @@ export function ProductsClient({ initialProducts, categories }: Props) {
               </TableRow>
             ) : (
               filtered.map(p => (
-                <TableRow key={p.id} className={!p.is_active ? 'opacity-50' : ''}>
-                  <TableCell>
-                    {p.image_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={p.image_url} alt={p.name} className="w-10 h-10 rounded object-cover" />
-                    ) : (
-                      <div className="w-10 h-10 rounded bg-muted flex items-center justify-center">
-                        <ImageIcon className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium">{p.name}</p>
-                      {p.name_ar && <p className="text-xs text-muted-foreground" dir="rtl">{p.name_ar}</p>}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm font-mono text-muted-foreground">{p.sku}</TableCell>
-                  <TableCell>
-                    {p.categories && (
-                      <Badge
-                        variant="outline"
-                        style={{ borderColor: p.categories.color ?? undefined, color: p.categories.color ?? undefined }}
-                        className="text-[10px]"
-                      >
-                        {p.categories.name}
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground capitalize">{p.unit}</TableCell>
-                  <TableCell className="text-right font-medium">{formatUsd(p.price_usd)}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">{formatLbp(p.price_lbp)}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex flex-col items-end gap-1">
-                      <span className="text-sm font-medium">{p.stock_qty}</span>
-                      {stockStatus(p)}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-1 justify-end">
-                      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => openEdit(p)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-amber-600" onClick={() => setArchiveId(p.id)}>
-                        <Archive className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                <ProductRow
+                  key={p.id}
+                  product={p}
+                  onEdit={openEdit}
+                  onArchive={setArchiveId}
+                />
               ))
             )}
           </TableBody>

@@ -1,49 +1,77 @@
 'use client'
 
-import { memo, useCallback } from 'react'
+import { memo, useCallback, useMemo } from 'react'
+import Image from 'next/image'
 import { usePosStore } from '@/lib/store/pos-store'
 import { formatUsd, formatLbp } from '@/lib/currency'
+import { filterProductsByCategoryAndSearch } from '@/lib/products/filter-products'
 import { Badge } from '@/components/ui/badge'
 import { Package } from 'lucide-react'
 
+export interface PosProduct {
+  id: string
+  name: string
+  name_ar: string | null
+  sku: string
+  barcode?: string | null
+  category_id: string | null
+  unit: string
+  price_usd: number
+  price_lbp: number
+  stock_qty: number
+  track_stock: boolean
+  reorder_level?: number
+  image_url: string | null
+}
+
 interface Props {
-  products: any[]
+  products: PosProduct[]
+  selectedCat: string
+  search: string
   disabled?: boolean
 }
 
 interface CardProps {
-  product: any
+  product: PosProduct
+  visible: boolean
   disabled: boolean
-  onAdd: (p: any) => void
+  onAdd: (p: PosProduct) => void
 }
 
-// Memoized individual card — only rerenders when its own product data or
-// disabled state changes, not when other cards' products change.
-const ProductCard = memo(function ProductCard({ product: p, disabled, onAdd }: CardProps) {
+const ProductCard = memo(function ProductCard({
+  product: p,
+  visible,
+  disabled,
+  onAdd,
+}: CardProps) {
   const outOfStock = p.track_stock && p.stock_qty <= 0
   const handleClick = useCallback(() => onAdd(p), [onAdd, p])
 
   return (
     <button
-      disabled={disabled || outOfStock}
+      type="button"
+      disabled={disabled || outOfStock || !visible}
       onClick={handleClick}
+      aria-hidden={!visible}
+      tabIndex={visible ? 0 : -1}
       className={`
-        relative flex flex-col rounded-xl border text-left transition-all
+        relative flex flex-col rounded-xl border text-left transition-[border-color,box-shadow,transform] duration-150
+        ${!visible ? 'hidden' : ''}
         ${outOfStock || disabled
           ? 'opacity-50 cursor-not-allowed bg-gray-50 border-gray-200'
           : 'bg-white border-gray-200 hover:border-[#1B2A4A] hover:shadow-md active:scale-95 cursor-pointer'
         }
       `}
     >
-      <div className="w-full aspect-square rounded-t-xl overflow-hidden bg-gray-100 flex items-center justify-center">
+      <div className="relative w-full aspect-square rounded-t-xl overflow-hidden bg-gray-100 flex items-center justify-center">
         {p.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={p.image_url}
             alt={p.name}
+            fill
+            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
             loading="lazy"
-            decoding="async"
-            className="w-full h-full object-cover"
+            className="object-cover"
           />
         ) : (
           <Package className="h-8 w-8 text-gray-300" />
@@ -71,24 +99,37 @@ const ProductCard = memo(function ProductCard({ product: p, disabled, onAdd }: C
   )
 })
 
-// Memoized grid — only rerenders when the filtered product list actually changes.
-// Without memo, any cart change in PosClient would rerender all N cards.
-export const ProductGrid = memo(function ProductGrid({ products, disabled }: Props) {
-  const addItem = usePosStore(s => s.addItem)
+export const ProductGrid = memo(function ProductGrid({
+  products,
+  selectedCat,
+  search,
+  disabled,
+}: Props) {
+  const addItem = usePosStore((s) => s.addItem)
 
-  const handleAdd = useCallback((p: any) => {
-    addItem({
-      product_id: p.id,
-      name: p.name,
-      name_ar: p.name_ar,
-      sku: p.sku,
-      unit: p.unit,
-      price_usd: p.price_usd,
-      price_lbp: p.price_lbp,
-    })
-  }, [addItem])
+  const handleAdd = useCallback(
+    (p: PosProduct) => {
+      addItem({
+        product_id: p.id,
+        name: p.name,
+        name_ar: p.name_ar,
+        sku: p.sku,
+        unit: p.unit,
+        price_usd: p.price_usd,
+        price_lbp: p.price_lbp,
+      })
+    },
+    [addItem]
+  )
 
-  if (products.length === 0) {
+  const visibleIds = useMemo(() => {
+    const visible = filterProductsByCategoryAndSearch(products, selectedCat, search)
+    return new Set(visible.map((p) => p.id))
+  }, [products, selectedCat, search])
+
+  const visibleCount = visibleIds.size
+
+  if (products.length === 0 || visibleCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-40 text-gray-400 gap-2">
         <Package className="h-8 w-8" />
@@ -99,10 +140,11 @@ export const ProductGrid = memo(function ProductGrid({ products, disabled }: Pro
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-      {products.map(p => (
+      {products.map((p) => (
         <ProductCard
           key={p.id}
           product={p}
+          visible={visibleIds.has(p.id)}
           disabled={!!disabled}
           onAdd={handleAdd}
         />
@@ -110,4 +152,3 @@ export const ProductGrid = memo(function ProductGrid({ products, disabled }: Pro
     </div>
   )
 })
-
