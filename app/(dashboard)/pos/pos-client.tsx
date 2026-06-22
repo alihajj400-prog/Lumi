@@ -11,6 +11,7 @@ import { CheckoutDialog } from './components/checkout-dialog'
 import { ReceiptDialog } from './components/receipt-dialog'
 import { HeldOrdersSheet } from './components/held-orders-sheet'
 import { CloseSessionDialog } from './components/close-session-dialog'
+import { ExpenseDialog } from './components/expense-dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -21,6 +22,7 @@ import {
   PlayCircle,
   LogOut,
   Zap,
+  Receipt,
 } from 'lucide-react'
 import { formatUsd } from '@/lib/currency'
 
@@ -43,6 +45,7 @@ export function PosClient({ products, categories, activeSession, userId, userPro
   const [showReceipt, setShowReceipt] = useState(false)
   const [showHeld, setShowHeld] = useState(false)
   const [showClose, setShowClose] = useState(false)
+  const [showExpense, setShowExpense] = useState(false)
   const [completedSale, setCompletedSale] = useState<any | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
@@ -151,6 +154,19 @@ export function PosClient({ products, categories, activeSession, userId, userPro
               <Pause className="h-4 w-4 mr-1" />
               Hold
             </Button>
+
+            {/* Log expense */}
+            {hasSession && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowExpense(true)}
+                className="text-amber-600 border-amber-200 hover:bg-amber-50"
+              >
+                <Receipt className="h-4 w-4 mr-1" />
+                Expense
+              </Button>
+            )}
 
             {/* Close session */}
             {hasSession && (
@@ -277,6 +293,21 @@ export function PosClient({ products, categories, activeSession, userId, userPro
           router.refresh()
         }}
       />
+
+      {sessionId && (
+        <ExpenseDialog
+          open={showExpense}
+          onOpenChange={setShowExpense}
+          sessionId={sessionId}
+          cashierId={userId}
+          branchId={userProfile?.branch_id ?? ''}
+          orgId={userProfile?.organization_id ?? ''}
+          onSaved={() => {
+            setShowExpense(false)
+            toast.success('Expense logged')
+          }}
+        />
+      )}
     </div>
   )
 }
